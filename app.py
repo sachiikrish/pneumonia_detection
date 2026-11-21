@@ -16,7 +16,22 @@ st.set_page_config(page_title="Pneumonia X-ray Classifier", layout="centered")
 
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model(MODEL_PATH, compile=False)
+    if not os.path.exists(MODEL_PATH):
+        st.error(f"Model file not found: {MODEL_PATH}")
+        return None
+
+    try:
+        model = tf.keras.models.load_model(
+            MODEL_PATH,
+            compile=False
+        )
+        return model
+
+    except Exception as e:
+        st.error(f"Model loading failed: {str(e)}")
+        return None
+
+model = load_model()
 
 
 def preprocess(pil_img):
@@ -25,27 +40,27 @@ def preprocess(pil_img):
     return (gray.astype("float32") / 255.0).reshape(IMG_SIZE, IMG_SIZE, 1)
 
 
-# ---------------- Grad-CAM (computed on the pre-sigmoid logit) ----------------
-def gradcam(model, img):
-    last_conv = [l.name for l in model.layers if isinstance(l, tf.keras.layers.Conv2D)][-1]
-    m = tf.keras.models.clone_model(model)
-    m.set_weights(model.get_weights())
-    m.layers[-1].activation = tf.keras.activations.linear   # logits instead of saturated sigmoid
-    grad_model = tf.keras.models.Model(m.inputs, [m.get_layer(last_conv).output, m.output])
+# # ---------------- Grad-CAM (computed on the pre-sigmoid logit) ----------------
+# def gradcam(model, img):
+#     last_conv = [l.name for l in model.layers if isinstance(l, tf.keras.layers.Conv2D)][-1]
+#     m = tf.keras.models.clone_model(model)
+#     m.set_weights(model.get_weights())
+#     m.layers[-1].activation = tf.keras.activations.linear   # logits instead of saturated sigmoid
+#     grad_model = tf.keras.models.Model(m.inputs, [m.get_layer(last_conv).output, m.output])
 
-    x = tf.convert_to_tensor(img[np.newaxis], dtype=tf.float32)
-    with tf.GradientTape() as tape:
-        conv_out, logit = grad_model(x, training=False)
-        score = logit[:, 0]
-    grads = tape.gradient(score, conv_out)
-    weights = tf.reduce_mean(grads, axis=(1, 2))
-    cam = tf.nn.relu(tf.reduce_sum(conv_out * weights[:, None, None, :], axis=-1)[0])
-    cam = (cam / (tf.reduce_max(cam) + 1e-8)).numpy()
+#     x = tf.convert_to_tensor(img[np.newaxis], dtype=tf.float32)
+#     with tf.GradientTape() as tape:
+#         conv_out, logit = grad_model(x, training=False)
+#         score = logit[:, 0]
+#     grads = tape.gradient(score, conv_out)
+#     weights = tf.reduce_mean(grads, axis=(1, 2))
+#     cam = tf.nn.relu(tf.reduce_sum(conv_out * weights[:, None, None, :], axis=-1)[0])
+#     cam = (cam / (tf.reduce_max(cam) + 1e-8)).numpy()
 
-    base = np.uint8(255 * img.squeeze())
-    heat = cv2.resize(cam, (IMG_SIZE, IMG_SIZE))
-    colored = cv2.cvtColor(cv2.applyColorMap(np.uint8(255 * heat), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
-    return cv2.addWeighted(cv2.cvtColor(base, cv2.COLOR_GRAY2RGB), 0.6, colored, 0.4, 0)
+#     base = np.uint8(255 * img.squeeze())
+#     heat = cv2.resize(cam, (IMG_SIZE, IMG_SIZE))
+#     colored = cv2.cvtColor(cv2.applyColorMap(np.uint8(255 * heat), cv2.COLORMAP_JET), cv2.COLOR_BGR2RGB)
+#     return cv2.addWeighted(cv2.cvtColor(base, cv2.COLOR_GRAY2RGB), 0.6, colored, 0.4, 0)
 
 
 # ---------------- UI ----------------
@@ -58,7 +73,6 @@ uploaded = st.file_uploader("Upload a chest X-ray (JPG / PNG)", type=["jpg", "jp
 if uploaded:
     pil_img = Image.open(uploaded)
     img = preprocess(pil_img)
-    model = load_model()
     prob = float(model.predict(img[np.newaxis], verbose=0)[0, 0])
     label = "PNEUMONIA" if prob >= THRESHOLD else "NORMAL"
 
